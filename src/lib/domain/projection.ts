@@ -28,6 +28,7 @@ interface ApplyContext {
   c: Collections;
   session?: ClientSession;
   devId: string;
+  workshopId?: string;
   now: Date;
 }
 
@@ -54,7 +55,7 @@ export function transactionsAreSupported(): boolean | undefined {
  * inside one transaction when the deployment supports them. Duplicate eventIds are counted as ignored.
  */
 export async function applyEventBatch(dev: DevDoc, events: EventInput[], now = new Date()): Promise<ApplyResult> {
-  const prepared = events.map((event, index) => prepareEvent(dev._id, event, index, now));
+  const prepared = events.map((event, index) => prepareEvent(dev._id, dev.workshopId, event, index, now));
 
   const client = getClient();
   const db = await getDb();
@@ -76,7 +77,7 @@ export async function applyEventBatch(dev: DevDoc, events: EventInput[], now = n
       }
       seen.add(p.doc._id);
       await c.events.insertOne(p.doc, { session });
-      await p.apply({ c, session, devId: dev._id, now });
+      await p.apply({ c, session, devId: dev._id, workshopId: dev.workshopId, now });
       accepted += 1;
     }
     return { accepted, ignored };
@@ -111,7 +112,7 @@ function isStandaloneError(error: unknown): boolean {
   return e?.code === 20 || /Transaction numbers are only allowed|replica set/i.test(e?.message ?? "");
 }
 
-function prepareEvent(devId: string, event: EventInput, index: number, now: Date): PreparedEvent {
+function prepareEvent(devId: string, workshopId: string | undefined, event: EventInput, index: number, now: Date): PreparedEvent {
   const occurredAt = clampOccurredAt(new Date(event.occurredAt), now);
   const payloadBytes = Buffer.byteLength(JSON.stringify(event.payload ?? null));
   if (payloadBytes > 32 * 1024) {
@@ -122,6 +123,8 @@ function prepareEvent(devId: string, event: EventInput, index: number, now: Date
   const doc: EventDoc = {
     _id: event.eventId,
     devId,
+    // Multi-workshop Business Rule 7: stamped from the authenticated dev, so scoped views never join through devs.
+    ...(workshopId ? { workshopId } : {}),
     type: event.type,
     ...(event.labId ? { labId: event.labId } : {}),
     occurredAt,
@@ -308,6 +311,7 @@ async function applyRunStarted(
       {
         $set: {
           devId: { $ifNull: ["$devId", ctx.devId] },
+          ...(ctx.workshopId ? { workshopId: { $ifNull: ["$workshopId", ctx.workshopId] } } : {}),
           labId: { $ifNull: ["$labId", labId] },
           target: { $ifNull: ["$target", payload.target] },
           startedAt: { $ifNull: ["$startedAt", occurredAt] },
@@ -365,6 +369,7 @@ async function applyRunFinished(
       {
         $set: {
           devId: { $ifNull: ["$devId", ctx.devId] },
+          ...(ctx.workshopId ? { workshopId: { $ifNull: ["$workshopId", ctx.workshopId] } } : {}),
           labId: { $ifNull: ["$labId", labId] },
           target: payload.target,
           status: payload.status,

@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { ApiError, handle, readJson } from "@/lib/api/errors";
-import { authenticateDev, bearerToken, generateDevToken, hashToken, requireWorkshopKey } from "@/lib/api/auth";
+import { authenticateDev, bearerToken, generateDevToken, hashToken, requireWorkshop } from "@/lib/api/auth";
 import { checkRateLimit, clientIp, RATE_LIMITS } from "@/lib/api/rateLimit";
 import { MAX_BODY_BYTES, registerSchema } from "@/lib/api/schemas";
 import { getCollections } from "@/lib/db/client";
 import type { DevDoc } from "@/lib/db/types";
 
-/** Business Rules 1, 3, 4, 5, 16: idempotent registration protected by the workshop key. */
+/** Business Rules 1, 3, 4, 5, 16: idempotent registration protected by a workshop code (the dev joins that workshop). */
 export const POST = handle(async (request: Request) => {
-  requireWorkshopKey(request);
+  // Rate limit first, so guessing workshop codes is throttled too.
   checkRateLimit(`register:${clientIp(request)}`, RATE_LIMITS.registrationsPerIp);
+  const workshop = await requireWorkshop(request);
 
   const parsed = registerSchema.safeParse(await readJson(request, MAX_BODY_BYTES));
   if (!parsed.success) {
@@ -39,6 +40,8 @@ export const POST = handle(async (request: Request) => {
       {
         $set: {
           username,
+          // Re-registering with another workshop's code moves the developer (multi-workshop Business Rule 6).
+          workshopId: workshop._id,
           lastSeenAt: now,
           archivedAt: null,
           ...(dashboardVersion !== undefined ? { dashboardVersion } : {}),
@@ -54,6 +57,7 @@ export const POST = handle(async (request: Request) => {
     _id: userId,
     username,
     tokenHash: hashToken(devToken),
+    workshopId: workshop._id,
     ...(dashboardVersion !== undefined ? { dashboardVersion } : {}),
     ...(platform !== undefined ? { platform } : {}),
     createdAt: now,

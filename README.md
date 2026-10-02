@@ -5,6 +5,7 @@ its identity, runs, progress, heartbeats and help requests to the public API of 
 page and sees every developer, their progress lab by lab, who is running what, and who is asking for help.
 
 Specification and API contract (shared with the labs repository): [`specs/admin-dashboard-progress-tracking/spec.md`](specs/admin-dashboard-progress-tracking/spec.md).
+Several workshops on one deployment: [`specs/multi-workshop/spec.md`](specs/multi-workshop/spec.md).
 
 - **Stack**: Next.js (App Router, TypeScript, React 19), MongoDB (official driver, one cached client), zod, TanStack Query, Tailwind.
 - **Hosting**: Vercel (this repository root is the Next.js project) + MongoDB Atlas (free M0 is enough for a cohort).
@@ -15,7 +16,7 @@ Specification and API contract (shared with the labs repository): [`specs/admin-
 ```bash
 cd AdminDashboard
 pnpm install
-cp .env.example .env.local        # then edit WORKSHOP_KEY, ADMIN_PASSWORD, SESSION_SECRET
+cp .env.example .env              # then edit MONGODB_URI, ADMIN_PASSWORD, SESSION_SECRET
 ```
 
 Pick one MongoDB:
@@ -28,8 +29,9 @@ Pick one MongoDB:
 Then:
 
 ```bash
-pnpm seed      # optional: 3 developers, 10 labs, a few runs, one open help request (dev database only)
+pnpm seed      # optional: 2 workshops, 3 developers, 10 labs, a few runs, one open help request (dev database only)
 pnpm dev       # http://localhost:3000 → /login with ADMIN_PASSWORD (another port: pnpm dev -p 3457)
+pnpm prod      # production build, then serves it on http://localhost:3000
 ```
 
 Quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test` (vitest + an in-memory MongoDB replica set, no Docker needed), `pnpm build`.
@@ -40,7 +42,7 @@ Quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test` (vitest + an in-memory
 |---|---|
 | `MONGODB_URI` | Connection string (Atlas `mongodb+srv://…` in production). |
 | `MONGODB_DB` | Database name, default `labs-admin`. The seed refuses any name other than `labs-admin` or `*-dev`. |
-| `WORKSHOP_KEY` | Shared secret given to the developers of the cohort; required to register a local dashboard (`X-Workshop-Key`). |
+| `WORKSHOP_KEY` | **Optional, legacy.** Workshops are created in the admin. If set, this old single-cohort key becomes a "Default workshop" at startup (or with `pnpm migrate:workshops`) and older developers are attached to it. |
 | `ADMIN_PASSWORD` | Trainer password for `/login`. |
 | `SESSION_SECRET` | ≥ 16 characters, signs the admin session cookie (httpOnly, SameSite=Lax, 12 h). |
 
@@ -50,15 +52,23 @@ Without `ADMIN_PASSWORD` / `SESSION_SECRET` the admin pages show a configuration
 
 1. Create a MongoDB Atlas cluster (M0), a database user, and allow access from anywhere (Vercel has no fixed IPs) or use Atlas's Vercel integration.
 2. Create a Vercel project from this repository (framework: Next.js, install command `pnpm install`; the repository root is the project, no Root Directory to set).
-3. Set the five environment variables above (Production and Preview). Generate secrets with `openssl rand -base64 32`.
+3. Set `MONGODB_URI`, `MONGODB_DB`, `ADMIN_PASSWORD` and `SESSION_SECRET` (Production and Preview). Generate secrets with `openssl rand -base64 32`.
 4. Deploy. Check `https://<your-app>/api/v1/health` → `{ "status": "ok", "db": "ok" }`.
-5. Give the developers the URL and the `WORKSHOP_KEY`; they put them in the **Reporting** settings of their local dashboard.
+5. Sign in, open **Workshops**, create one, and click **Copy student instructions**. Developers paste the server URL and the workshop code into the **Reporting** settings of their local dashboard.
+
+## Workshops
+
+One deployment serves any number of workshops. Each one has a generated 8-character code (`XXXX-XXXX`, no 0/O/1/I/L, case and dash ignored) that the local dashboard sends as `X-Workshop-Key` at registration; nothing changes on the local dashboard side.
+
+- **Workshops page** (`/workshops`): create, rename, copy the code or the student instructions, regenerate the code (the old one stops working for new registrations, registered developers keep reporting), close / reopen (a closed workshop refuses new registrations only), delete (only when it has no developer).
+- **Selector** in the top bar: scopes the overview, matrix (and its CSV), help queue and feed to one workshop, or shows all of them with a workshop label on each developer. The choice is remembered in a cookie.
+- A developer who registers again with another workshop's code moves to that workshop; their earlier runs, events and help requests stay with the workshop they were recorded in.
 
 Collections and indexes are created by the app itself (`ensureIndexes` on the first database access, plus a startup check that logs anything missing). There is no migration step.
 
 ## Data
 
-Five collections (see the spec's Data Model): `devs` (one document per developer, lab progression **embedded**), `labs`
+Six collections (see the specs' Data Models): `workshops` (name, unique code, status), `devs` (one document per developer, lab progression **embedded**), `labs`
 (catalog union reported by the dashboards), `runs`, `helpRequests` (partial unique index: one open/acknowledged request
 per developer), `events` (append-only log, `_id` = client `eventId` for idempotency).
 
@@ -73,7 +83,7 @@ Public (called by the .NET server of each local dashboard, never by a browser; J
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `POST /api/v1/devs/register` `{ userId, username, dashboardVersion?, platform? }` | `X-Workshop-Key` (+ `Authorization: Bearer` when the id is already known) | 201 with `devToken` the first time; 200 refresh afterwards; 403 for a known id without its token |
+| `POST /api/v1/devs/register` `{ userId, username, dashboardVersion?, platform? }` | `X-Workshop-Key` = a workshop code (+ `Authorization: Bearer` when the id is already known) | 201 with `devToken` the first time; 200 refresh afterwards; 403 for a known id without its token |
 | `POST /api/v1/events` `{ userId, username, events: [{ eventId, type, occurredAt, labId?, payload }] }` | Bearer dev token | 202 `{ accepted, ignored, serverTime }`; 1–100 events, 256 KB, all-or-nothing, duplicates ignored |
 | `POST /api/v1/help-requests` `{ userId, username, labId?, message? }` | Bearer | 201, or 409 with the existing active request |
 | `POST /api/v1/help-requests/{id}/cancel` `{ userId, username }` | Bearer | "I'm unblocked" |
@@ -86,7 +96,9 @@ in the feed as "Other event". Rate limits: 120 requests/min per token, 30 regist
 
 Admin (session cookie): `POST /api/admin/login|logout`, `GET /api/admin/overview`, `GET /api/admin/matrix`,
 `GET /api/admin/devs/{id}`, `POST /api/admin/devs/{id}/archive|unarchive`, `GET /api/admin/help-requests?status=…`,
-`POST /api/admin/help-requests/{id}/acknowledge|resolve`, `GET /api/admin/events?devId=&type=&cursor=`.
+`POST /api/admin/help-requests/{id}/acknowledge|resolve`, `GET /api/admin/events?devId=&type=&cursor=`,
+`GET|POST /api/admin/workshops`, `PATCH|DELETE /api/admin/workshops/{id}`, `POST /api/admin/workshops/{id}/rotate-code`.
+Overview, matrix, help requests and events accept `?workshopId=` (absent = every workshop, unknown = 404).
 
 ## Pages
 
@@ -96,6 +108,7 @@ Admin (session cookie): `POST /api/admin/login|logout`, `GET /api/admin/overview
 | `/` | Counters, banner of open help requests with inline Acknowledge / Resolve, developer cards sorted needs-help → running → online → idle → offline. |
 | `/matrix` | Labs × developers grid, blocked cells outlined in red, CSV export. |
 | `/help` | Active queue (oldest first) and history, optional sound alert (stored in the browser). |
+| `/workshops` | Workshops with their codes, developer counts and actions (see above). |
 | `/devs/[userId]` | Labs with state / last result / runs / tokens, last 50 runs, help requests, paginated activity feed, archive / unarchive. |
 
 English and French (`EN | FR` in the top bar), dark theme, usable on a tablet.
@@ -104,4 +117,4 @@ English and French (`EN | FR` in the top bar), dark theme, usable on a tablet.
 
 - Rate-limit and login-throttle counters live in memory: on serverless hosting each instance counts separately. They are a safety net, not accounting.
 - A developer who deletes their local `identity.json` becomes a new developer here; archive the old one.
-- No cohort / multi-workshop separation yet: one deployment = one cohort (see the spec's Future Considerations).
+- A single admin password sees every workshop; there are no per-workshop trainer accounts.

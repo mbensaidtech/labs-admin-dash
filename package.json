@@ -6,12 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "prod": "next build && next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "mongo:memory": "tsx scripts/mongo-memory.ts",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "migrate:workshops": "tsx scripts/migrate-workshops.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.1",

@@ -5,10 +5,15 @@ export const INDEXES: Record<string, IndexDescription[]> = {
   devs: [
     { key: { archivedAt: 1, lastActivityAt: -1 }, name: "overview" },
     { key: { catalogLabIds: 1 }, name: "catalogLabIds" },
+    { key: { workshopId: 1, archivedAt: 1, lastActivityAt: -1 }, name: "workshopOverview" },
   ],
-  runs: [{ key: { devId: 1, startedAt: -1 }, name: "devRuns" }],
+  runs: [
+    { key: { devId: 1, startedAt: -1 }, name: "devRuns" },
+    { key: { workshopId: 1, startedAt: -1 }, name: "workshopRuns" },
+  ],
   helpRequests: [
     { key: { status: 1, createdAt: 1 }, name: "queue" },
+    { key: { workshopId: 1, status: 1, createdAt: 1 }, name: "workshopQueue" },
     { key: { devId: 1, createdAt: -1 }, name: "devHelp" },
     {
       key: { devId: 1 },
@@ -21,8 +26,13 @@ export const INDEXES: Record<string, IndexDescription[]> = {
     { key: { devId: 1, receivedAt: -1 }, name: "devFeed" },
     { key: { receivedAt: -1 }, name: "feed" },
     { key: { type: 1, receivedAt: -1 }, name: "typeFeed" },
+    { key: { workshopId: 1, receivedAt: -1 }, name: "workshopFeed" },
   ],
   labs: [],
+  workshops: [
+    { key: { code: 1 }, name: "code", unique: true },
+    { key: { status: 1, createdAt: -1 }, name: "list" },
+  ],
 };
 
 export async function ensureIndexes(db: Db): Promise<void> {

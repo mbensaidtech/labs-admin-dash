@@ -46,7 +46,7 @@ export function HelpActions({ id, status, compact }: { id: string; status: HelpS
       </button>
       {error ? <span role="alert" className="text-xs text-red">{error}</span> : null}
 
-      <dialog ref={dialog} className="w-full max-w-md rounded-lg border border-border bg-panel p-0 text-text" onClose={() => setNote("")}>
+      <dialog ref={dialog} className="m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-border bg-panel p-0 text-text backdrop:bg-black/60" onClose={() => setNote("")}>
         <form
           method="dialog"
           className="flex flex-col gap-3 p-5"

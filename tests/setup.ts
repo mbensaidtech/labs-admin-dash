@@ -14,6 +14,8 @@ beforeEach(async () => {
   for (const name of ["devs", "labs", "runs", "helpRequests", "events"]) {
     await db.collection(name).deleteMany({});
   }
+  // The Default workshop (from WORKSHOP_KEY, created on connect) stays: the shared helpers register with its code.
+  await db.collection("workshops").deleteMany({ legacy: { $ne: true } });
   resetRateLimits();
   resetLoginThrottle();
 });

@@ -130,3 +130,10 @@ export const heartbeatPayload = z.object({
 export const settingsChangedPayload = z.object({
   authMode: z.enum(["apiKey", "entraId", "notConfigured"]).optional(),
 });
+
+/** Workshops (admin): a trimmed name of 2–80 characters; the status can be switched between active and closed. */
+export const workshopNameSchema = z.string().trim().min(2, "name must be 2-80 characters").max(80, "name must be 2-80 characters");
+export const createWorkshopSchema = z.object({ name: workshopNameSchema });
+export const updateWorkshopSchema = z
+  .object({ name: workshopNameSchema.optional(), status: z.enum(["active", "closed"]).optional() })
+  .refine((value) => value.name !== undefined || value.status !== undefined, { message: "name or status is required", path: ["name"] });

@@ -68,6 +68,11 @@ export function DevDetailView({ id, initial }: { id: string; initial: DevDetailD
         <div className="flex flex-wrap items-center gap-4">
           <DevStatePill state={data.dev.state} />
           <span className="font-mono text-xs text-muted">{data.dev.id}</span>
+          {data.dev.workshop ? (
+            <span className="text-sm text-muted">
+              {t("workshops.label")}: <span className="text-text">{data.dev.workshop.name}</span>
+            </span>
+          ) : null}
           <span className="text-sm text-muted">
             {t("dev.since", { time: absoluteTime(data.dev.createdAt, locale) })}
           </span>

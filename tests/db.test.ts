@@ -6,7 +6,7 @@ describe("collections and indexes (T2)", () => {
   it("creates every collection and index of the data model at startup", async () => {
     const db = await getDb();
     const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name).sort();
-    expect(names).toEqual(["devs", "events", "helpRequests", "labs", "runs"]);
+    expect(names).toEqual(["devs", "events", "helpRequests", "labs", "runs", "workshops"]);
     expect(await missingIndexes(db)).toEqual([]);
   });
 

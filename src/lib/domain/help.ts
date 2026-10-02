@@ -45,7 +45,7 @@ export async function findLastHelpRequest(devId: string): Promise<HelpRequestDoc
 /** Business Rule 9: at most one active request per developer (409 carrying the existing one). */
 export async function createHelpRequest(
   devId: string,
-  input: { labId?: string; message?: string },
+  input: { labId?: string; message?: string; workshopId?: string },
   now = new Date(),
 ): Promise<HelpRequestDoc> {
   const { helpRequests, events, devs } = await getCollections();
@@ -57,6 +57,7 @@ export async function createHelpRequest(
   const doc: HelpRequestDoc = {
     _id: randomUUID(),
     devId,
+    ...(input.workshopId ? { workshopId: input.workshopId } : {}),
     ...(input.labId ? { labId: input.labId } : {}),
     ...(input.message?.trim() ? { message: input.message.trim() } : {}),
     status: "open",
@@ -79,6 +80,7 @@ export async function createHelpRequest(
   await events.insertOne({
     _id: randomUUID(),
     devId,
+    ...(doc.workshopId ? { workshopId: doc.workshopId } : {}),
     type: "help.requested",
     ...(doc.labId ? { labId: doc.labId } : {}),
     occurredAt: now,
@@ -111,6 +113,7 @@ export async function cancelHelpRequest(devId: string, id: string, now = new Dat
   await events.insertOne({
     _id: randomUUID(),
     devId,
+    ...(updated.workshopId ? { workshopId: updated.workshopId } : {}),
     type: "help.cancelled",
     ...(updated.labId ? { labId: updated.labId } : {}),
     occurredAt: now,
@@ -157,6 +160,7 @@ export async function resolveHelpRequest(id: string, adminNote: string | undefin
   await events.insertOne({
     _id: randomUUID(),
     devId: updated.devId,
+    ...(updated.workshopId ? { workshopId: updated.workshopId } : {}),
     type: "help.resolved",
     ...(updated.labId ? { labId: updated.labId } : {}),
     occurredAt: now,

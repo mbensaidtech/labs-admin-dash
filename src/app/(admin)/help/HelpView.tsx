@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePref, writePref } from "@/lib/prefs";
 import { useHelpQueue } from "@/lib/api/hooks";
+import { useWorkshopScope } from "@/lib/admin/WorkshopScopeProvider";
 import { useNow } from "@/lib/api/useNow";
 import { useI18n } from "@/lib/i18n/provider";
 import { absoluteTime, elapsedText } from "@/lib/i18n/time";
-import type { HelpQueueItemDto } from "@/lib/domain/queries";
+import type { HelpQueueItemDto, WorkshopScope } from "@/lib/domain/queries";
+import { WorkshopLabel } from "@/components/WorkshopLabel";
 import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { HelpActions } from "@/components/HelpActions";
 import { Page } from "@/components/Page";
@@ -31,17 +33,31 @@ function beep() {
   }
 }
 
-export function HelpView({ initialActive, initialHistory }: { initialActive: HelpQueueItemDto[]; initialHistory: HelpQueueItemDto[] }) {
+export function HelpView({
+  initialScope,
+  initialActive,
+  initialHistory,
+}: {
+  initialScope: WorkshopScope;
+  initialActive: HelpQueueItemDto[];
+  initialHistory: HelpQueueItemDto[];
+}) {
   const { t, locale } = useI18n();
+  const { scope } = useWorkshopScope();
   const [tab, setTab] = useState<"active" | "history">("active");
   const sound = usePref(SOUND_KEY) === "1";
-  const active = useHelpQueue("open,acknowledged", initialActive);
-  const history = useHelpQueue("resolved,cancelled", initialHistory);
+  const active = useHelpQueue("open,acknowledged", scope, { scope: initialScope, items: initialActive });
+  const history = useHelpQueue("resolved,cancelled", scope, { scope: initialScope, items: initialHistory });
   const now = useNow();
   const knownIds = useRef<Set<string> | null>(null);
 
-  // One beep per request that was not in the previous poll (never on the first render).
+  // One beep per request that was not in the previous poll (never on the first render, nor on a scope switch).
+  const lastScope = useRef(scope);
   useEffect(() => {
+    if (lastScope.current !== scope) {
+      lastScope.current = scope;
+      knownIds.current = null;
+    }
     const items = active.data ?? [];
     if (knownIds.current === null) {
       knownIds.current = new Set(items.map((item) => item.id));
@@ -50,7 +66,7 @@ export function HelpView({ initialActive, initialHistory }: { initialActive: Hel
     const fresh = items.filter((item) => !knownIds.current!.has(item.id));
     knownIds.current = new Set(items.map((item) => item.id));
     if (fresh.length > 0 && sound) beep();
-  }, [active.data, sound]);
+  }, [active.data, sound, scope]);
 
   const toggleSound = () => {
     const next = !sound;
@@ -58,7 +74,7 @@ export function HelpView({ initialActive, initialHistory }: { initialActive: Hel
     if (next) beep();
   };
 
-  const list = tab === "active" ? (active.data ?? initialActive) : (history.data ?? initialHistory);
+  const list = (tab === "active" ? active.data : history.data) ?? [];
 
   return (
     <Page
@@ -98,6 +114,7 @@ export function HelpView({ initialActive, initialHistory }: { initialActive: Hel
                 <Link href={`/devs/${request.dev.id}`} className="font-semibold hover:underline">
                   {request.dev.username}
                 </Link>
+                {scope ? null : <WorkshopLabel workshop={request.workshop} />}
                 <span className="text-sm text-muted">{request.lab ? `${request.lab.number} · ${request.lab.title}` : (request.labId ?? t("help.noLab"))}</span>
                 <span className="text-xs text-muted" title={absoluteTime(request.createdAt, locale)}>
                   {tab === "active" ? t("help.waitingFor", { duration: elapsedText(request.createdAt, now, t) }) : absoluteTime(request.closedAt ?? request.createdAt, locale)}

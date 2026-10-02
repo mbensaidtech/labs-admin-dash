@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useOverview } from "@/lib/api/hooks";
+import { useWorkshopScope } from "@/lib/admin/WorkshopScopeProvider";
 import { useNow } from "@/lib/api/useNow";
 import { useI18n } from "@/lib/i18n/provider";
 import { elapsedText } from "@/lib/i18n/time";
@@ -13,10 +14,12 @@ import { Page } from "@/components/Page";
 import { ProgressBar } from "@/components/ProgressBar";
 import { RelativeTime } from "@/components/RelativeTime";
 import { DevStatePill } from "@/components/StatePill";
+import { WorkshopLabel } from "@/components/WorkshopLabel";
 
 export function OverviewView({ initial }: { initial: OverviewDto }) {
   const { t } = useI18n();
-  const query = useOverview(initial);
+  const { scope } = useWorkshopScope();
+  const query = useOverview(initial, scope);
   const now = useNow();
   const data = query.data ?? initial;
   const labTitle = (id?: string) => (id ? (data.labs.find((lab) => lab.id === id)?.title ?? id) : undefined);
@@ -43,6 +46,7 @@ export function OverviewView({ initial }: { initial: OverviewDto }) {
                 <Link href={`/devs/${request.dev.id}`} className="font-medium underline-offset-2 hover:underline">
                   {request.dev.username}
                 </Link>
+                {scope ? null : <WorkshopLabel workshop={request.workshop} />}
                 <span className="text-muted">{request.lab?.title ?? request.labId ?? t("help.noLab")}</span>
                 {request.message ? <span className="italic text-muted">“{request.message}”</span> : null}
                 <span className="text-xs text-muted">{t("help.waitingFor", { duration: elapsedText(request.createdAt, now, t) })}</span>
@@ -55,7 +59,15 @@ export function OverviewView({ initial }: { initial: OverviewDto }) {
         </section>
       ) : null}
 
-      {data.devs.length === 0 ? (
+      {data.workshopCount === 0 && data.devs.length === 0 ? (
+        <section className="rounded-lg border border-border bg-panel p-6 text-center">
+          <h2 className="mb-1 font-semibold">{t("workshops.firstTitle")}</h2>
+          <p className="mb-4 text-sm text-muted">{t("workshops.firstBody")}</p>
+          <Link href="/workshops" className="inline-block rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
+            {t("workshops.firstAction")}
+          </Link>
+        </section>
+      ) : data.devs.length === 0 ? (
         <p className="rounded-lg border border-border bg-panel p-6 text-center text-muted">{t("overview.empty")}</p>
       ) : (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -70,6 +82,11 @@ export function OverviewView({ initial }: { initial: OverviewDto }) {
                   <div>
                     <div className="font-semibold">{dev.username}</div>
                     <div className="font-mono text-xs text-muted">{dev.id.slice(0, 8)}</div>
+                    {scope ? null : (
+                      <div className="mt-1">
+                        <WorkshopLabel workshop={dev.workshop} />
+                      </div>
+                    )}
                   </div>
                   <DevStatePill state={dev.state} />
                 </div>

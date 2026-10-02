@@ -1,7 +1,8 @@
 import { MongoClient, type Db, type Collection, type MongoClientOptions } from "mongodb";
 import { readEnv } from "@/lib/env";
 import { ensureIndexes } from "@/lib/db/indexes";
-import type { DevDoc, EventDoc, HelpRequestDoc, LabDoc, RunDoc } from "@/lib/db/types";
+import { migrateLegacyWorkshop } from "@/lib/db/legacyWorkshop";
+import type { DevDoc, EventDoc, HelpRequestDoc, LabDoc, RunDoc, WorkshopDoc } from "@/lib/db/types";
 
 interface Cached {
   uri: string;
@@ -25,6 +26,7 @@ export interface Collections {
   runs: Collection<RunDoc>;
   helpRequests: Collection<HelpRequestDoc>;
   events: Collection<EventDoc>;
+  workshops: Collection<WorkshopDoc>;
 }
 
 export function getClient(): MongoClient {
@@ -47,6 +49,7 @@ export function collections(db: Db): Collections {
     runs: db.collection<RunDoc>("runs"),
     helpRequests: db.collection<HelpRequestDoc>("helpRequests"),
     events: db.collection<EventDoc>("events"),
+    workshops: db.collection<WorkshopDoc>("workshops"),
   };
 }
 
@@ -71,6 +74,10 @@ function getCached(): Cached {
     .then(async (connected) => {
       const db = connected.db(mongodbDb);
       await ensureIndexes(db);
+      // Business Rule 9 of the multi-workshop spec: never fatal, the app works without it.
+      await migrateLegacyWorkshop(db, readEnv().workshopKey).catch((error: unknown) => {
+        console.warn("Legacy WORKSHOP_KEY migration failed; it will be retried on the next start.", error);
+      });
       return db;
     })
     .catch((error: unknown) => {

@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ApiError } from "@/lib/api/errors";
-import { readEnv } from "@/lib/env";
 import { getCollections } from "@/lib/db/client";
-import type { DevDoc } from "@/lib/db/types";
+import type { DevDoc, WorkshopDoc } from "@/lib/db/types";
+import { workshopForRegistration } from "@/lib/domain/workshops";
 
 export function generateDevToken(): string {
   return randomBytes(32).toString("base64url");
@@ -24,12 +24,9 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-export function requireWorkshopKey(request: Request): void {
-  const { workshopKey } = readEnv();
-  const provided = request.headers.get("x-workshop-key") ?? "";
-  if (!workshopKey || !provided || !safeEqual(provided, workshopKey)) {
-    throw new ApiError("unauthorized", "A valid X-Workshop-Key header is required");
-  }
+/** The workshop whose code is sent as X-Workshop-Key (multi-workshop Business Rules 1–4); 401 otherwise. */
+export async function requireWorkshop(request: Request): Promise<WorkshopDoc> {
+  return workshopForRegistration(request.headers.get("x-workshop-key") ?? "");
 }
 
 export function bearerToken(request: Request): string | null {

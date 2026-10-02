@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { postJson } from "@/lib/api/client";
+import { WorkshopSelector } from "@/components/WorkshopSelector";
 import { useI18n } from "@/lib/i18n/provider";
 import type { Locale } from "@/lib/i18n/messages";
 
-const LINKS: { href: string; key: "nav.overview" | "nav.matrix" | "nav.help" }[] = [
+const LINKS: { href: string; key: "nav.overview" | "nav.matrix" | "nav.help" | "nav.workshops" }[] = [
   { href: "/", key: "nav.overview" },
   { href: "/matrix", key: "nav.matrix" },
   { href: "/help", key: "nav.help" },
+  { href: "/workshops", key: "nav.workshops" },
 ];
 
 export function TopBar({ helpCount }: { helpCount?: number }) {
@@ -47,9 +49,10 @@ export function TopBar({ helpCount }: { helpCount?: number }) {
             );
           })}
         </nav>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <WorkshopSelector />
           <LocaleSwitch locale={locale} setLocale={setLocale} label={t("lang.aria")} />
-          <button type="button" onClick={logout} className="rounded border border-border px-3 py-1.5 text-sm text-muted hover:text-text">
+          <button type="button" onClick={logout} className="whitespace-nowrap rounded border border-border px-3 py-1.5 text-sm text-muted hover:text-text">
             {t("nav.logout")}
           </button>
         </div>

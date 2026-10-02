@@ -4,6 +4,7 @@ export type RunStatus = "running" | "passed" | "failed" | "cancelled" | "timedOu
 export type FailureStage = "build" | "run" | "checks" | "input" | "dashboard";
 export type HelpStatus = "open" | "acknowledged" | "resolved" | "cancelled";
 export type HelpClosedBy = "admin" | "dev";
+export type WorkshopStatus = "active" | "closed";
 
 export const PROGRESS_STATES: readonly ProgressState[] = ["notStarted", "inProgress", "completed"];
 export const RUN_TARGETS: readonly RunTarget[] = ["start", "solution"];
@@ -39,6 +40,8 @@ export interface DevDoc {
   lastActivityType?: string;
   lastActivityLab?: string;
   archivedAt?: Date | null;
+  /** Workshop the developer registered with (absent only on data older than workshops). */
+  workshopId?: string;
   catalogLabIds: string[];
   progress: Record<string, LabProgress>;
 }
@@ -58,6 +61,7 @@ export interface LabDoc {
 export interface RunDoc {
   _id: string;
   devId: string;
+  workshopId?: string;
   labId: string;
   target: RunTarget;
   status: RunStatus;
@@ -74,6 +78,7 @@ export interface RunDoc {
 export interface HelpRequestDoc {
   _id: string;
   devId: string;
+  workshopId?: string;
   labId?: string;
   message?: string;
   status: HelpStatus;
@@ -87,9 +92,24 @@ export interface HelpRequestDoc {
 export interface EventDoc {
   _id: string;
   devId: string;
+  workshopId?: string;
   type: string;
   labId?: string;
   occurredAt: Date;
   receivedAt: Date;
   payload: unknown;
+}
+
+export interface WorkshopDoc {
+  _id: string;
+  name: string;
+  /** Normalized code (uppercase, no separators): the value developers send as X-Workshop-Key. */
+  code: string;
+  status: WorkshopStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  closedAt?: Date | null;
+  codeRotatedAt?: Date;
+  /** Created from the legacy WORKSHOP_KEY environment variable. */
+  legacy?: boolean;
 }

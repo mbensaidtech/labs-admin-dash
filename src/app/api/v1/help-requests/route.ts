@@ -17,6 +17,6 @@ export const POST = handle(async (request: Request) => {
 
   const { devs } = await getCollections();
   await devs.updateOne({ _id: dev._id }, { $set: { username: parsed.data.username } });
-  const created = await createHelpRequest(dev._id, { labId: parsed.data.labId, message: parsed.data.message });
+  const created = await createHelpRequest(dev._id, { labId: parsed.data.labId, message: parsed.data.message, workshopId: dev.workshopId });
   return NextResponse.json({ id: created._id, status: created.status, createdAt: created.createdAt.toISOString() }, { status: 201 });
 });

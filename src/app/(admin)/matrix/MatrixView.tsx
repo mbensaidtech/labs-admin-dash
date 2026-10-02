@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMatrix } from "@/lib/api/hooks";
+import { useMatrix, useWorkshops } from "@/lib/api/hooks";
+import { useWorkshopScope } from "@/lib/admin/WorkshopScopeProvider";
 import { useI18n } from "@/lib/i18n/provider";
 import type { MatrixDto } from "@/lib/domain/queries";
 import type { LabDisplayState } from "@/lib/domain/states";
 import { DisconnectedBanner } from "@/components/DisconnectedBanner";
 import { Page } from "@/components/Page";
 import { DevStatePill } from "@/components/StatePill";
+import { WorkshopLabel } from "@/components/WorkshopLabel";
 
 const CELL: Record<LabDisplayState, string> = {
   notStarted: "bg-panel-2 text-muted",
@@ -21,8 +23,11 @@ const ICON: Record<LabDisplayState, string> = { notStarted: "Â·", inProgress: "â
 
 export function MatrixView({ initial }: { initial: MatrixDto }) {
   const { t } = useI18n();
-  const query = useMatrix(initial);
+  const { scope } = useWorkshopScope();
+  const query = useMatrix(initial, scope);
+  const { data: workshops } = useWorkshops();
   const data = query.data ?? initial;
+  const scopeName = scope ? workshops?.find((workshop) => workshop.id === scope)?.name : undefined;
 
   const exportCsv = () => {
     const header = [t("matrix.developer"), ...data.labs.map((lab) => `${lab.number} ${lab.title}`.trim())];
@@ -32,7 +37,7 @@ export function MatrixView({ initial }: { initial: MatrixDto }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `labs-matrix-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `labs-matrix-${scopeName ? `${slugify(scopeName)}-` : ""}${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -76,8 +81,9 @@ export function MatrixView({ initial }: { initial: MatrixDto }) {
                     <Link href={`/devs/${row.dev.id}`} className="hover:underline">
                       {row.dev.username}
                     </Link>
-                    <div className="mt-1">
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
                       <DevStatePill state={row.dev.state} />
+                      {scope ? null : <WorkshopLabel workshop={row.dev.workshop} />}
                     </div>
                   </th>
                   {row.cells.map((cell) => {
@@ -102,5 +108,16 @@ export function MatrixView({ initial }: { initial: MatrixDto }) {
         </div>
       )}
     </Page>
+  );
+}
+
+function slugify(value: string): string {
+  return (
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "workshop"
   );
 }

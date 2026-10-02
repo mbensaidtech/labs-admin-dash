@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local env files
 .env.local
+
+# browser automation artefacts
+/.playwright-mcp

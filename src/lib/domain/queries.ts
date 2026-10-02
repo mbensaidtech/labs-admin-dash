@@ -3,6 +3,7 @@ import { ApiError } from "@/lib/api/errors";
 import { getCollections } from "@/lib/db/client";
 import { ACTIVE_HELP_STATUSES, type DevDoc, type EventDoc, type HelpStatus, type LabDoc, type LabProgress, type RunDoc } from "@/lib/db/types";
 import { toHelpDto, type HelpRequestDto } from "@/lib/domain/help";
+import { workshopNames, type WorkshopRefDto } from "@/lib/domain/workshops";
 import { activeRunLab, completedCount, devState, isOnline, labDisplayState, DEV_STATE_ORDER, type DevState, type LabDisplayState } from "@/lib/domain/states";
 
 export interface LabDto {
@@ -28,10 +29,23 @@ export interface DevSummaryDto {
   currentLab?: string;
   activeHelpRequestId?: string;
   archived: boolean;
+  workshop?: WorkshopRefDto;
 }
+
+/** Scope of an admin read: one workshop id, or null for every workshop (multi-workshop Business Rule 8). */
+export type WorkshopScope = string | null;
+
+function scopeFilter(scope: WorkshopScope): { workshopId?: string } {
+  return scope ? { workshopId: scope } : {};
+}
+
+const NOT_ARCHIVED: Filter<DevDoc> = { $or: [{ archivedAt: null }, { archivedAt: { $exists: false } }] };
 
 export interface OverviewDto {
   serverTime: string;
+  scope: WorkshopScope;
+  /** Number of workshops on the deployment (0 → "create your first workshop"). */
+  workshopCount: number;
   counters: { devs: number; online: number; running: number; needsHelp: number; completedLabs: number; completedToday: number };
   labs: LabDto[];
   devs: DevSummaryDto[];
@@ -40,6 +54,7 @@ export interface OverviewDto {
 
 export interface HelpQueueItemDto extends HelpRequestDto {
   dev: { id: string; username: string };
+  workshop?: WorkshopRefDto;
   lab?: LabDto;
 }
 
@@ -99,6 +114,7 @@ export interface DevDetailDto {
 
 export interface MatrixDto {
   serverTime: string;
+  scope: WorkshopScope;
   labs: (LabDto & { declared: boolean })[];
   rows: { dev: DevSummaryDto; cells: { labId: string; state: LabDisplayState; lastRunStatus?: LabProgress["lastRunStatus"]; runCount: number; blocked: boolean }[] }[];
 }
@@ -111,7 +127,11 @@ function sortLabs(labs: LabDoc[]): LabDoc[] {
   return [...labs].sort((a, b) => a.sortOrder - b.sortOrder || a.number.localeCompare(b.number) || a._id.localeCompare(b._id));
 }
 
-function toDevSummary(dev: DevDoc, activeHelp: Map<string, string>, now: Date): DevSummaryDto {
+function workshopRef(id: string | undefined, names: Map<string, string>): { workshop?: WorkshopRefDto } {
+  return id && names.has(id) ? { workshop: { id, name: names.get(id)! } } : {};
+}
+
+function toDevSummary(dev: DevDoc, activeHelp: Map<string, string>, now: Date, names: Map<string, string>): DevSummaryDto {
   const helpId = activeHelp.get(dev._id);
   const state = devState(dev, helpId !== undefined, now);
   const { completed, total } = completedCount(dev);
@@ -129,6 +149,7 @@ function toDevSummary(dev: DevDoc, activeHelp: Map<string, string>, now: Date): 
     ...(currentLab ? { currentLab } : {}),
     ...(helpId ? { activeHelpRequestId: helpId } : {}),
     archived: Boolean(dev.archivedAt),
+    ...workshopRef(dev.workshopId, names),
   };
 }
 
@@ -138,22 +159,23 @@ function sortDevs(devs: DevSummaryDto[]): DevSummaryDto[] {
   );
 }
 
-async function activeHelpByDev(): Promise<Map<string, string>> {
+async function activeHelpByDev(filter: { workshopId?: string; devId?: string } = {}): Promise<Map<string, string>> {
   const { helpRequests } = await getCollections();
-  const active = await helpRequests.find({ status: { $in: [...ACTIVE_HELP_STATUSES] } }, { projection: { _id: 1, devId: 1 } }).toArray();
+  const active = await helpRequests.find({ ...filter, status: { $in: [...ACTIVE_HELP_STATUSES] } }, { projection: { _id: 1, devId: 1 } }).toArray();
   return new Map(active.map((request) => [request.devId, request._id]));
 }
 
-export async function getOverview(now = new Date()): Promise<OverviewDto> {
+export async function getOverview(scope: WorkshopScope = null, now = new Date()): Promise<OverviewDto> {
   const { devs, labs } = await getCollections();
-  const [devDocs, labDocs, activeHelp, queue] = await Promise.all([
-    devs.find({ $or: [{ archivedAt: null }, { archivedAt: { $exists: false } }] }).toArray(),
+  const [devDocs, labDocs, activeHelp, queue, names] = await Promise.all([
+    devs.find({ ...scopeFilter(scope), ...NOT_ARCHIVED }).toArray(),
     labs.find({}).toArray(),
-    activeHelpByDev(),
-    listHelpRequests(["open", "acknowledged"]),
+    activeHelpByDev(scopeFilter(scope)),
+    listHelpRequests(["open", "acknowledged"], { scope }),
+    workshopNames(),
   ]);
 
-  const summaries = sortDevs(devDocs.map((dev) => toDevSummary(dev, activeHelp, now)));
+  const summaries = sortDevs(devDocs.map((dev) => toDevSummary(dev, activeHelp, now, names)));
   const startOfDay = new Date(now);
   startOfDay.setUTCHours(0, 0, 0, 0);
   let completedLabs = 0;
@@ -169,6 +191,8 @@ export async function getOverview(now = new Date()): Promise<OverviewDto> {
 
   return {
     serverTime: now.toISOString(),
+    scope,
+    workshopCount: names.size,
     counters: {
       devs: summaries.length,
       online: devDocs.filter((dev) => isOnline(dev, now)).length,
@@ -183,11 +207,11 @@ export async function getOverview(now = new Date()): Promise<OverviewDto> {
   };
 }
 
-export async function listHelpRequests(statuses: HelpStatus[], limit = 200): Promise<HelpQueueItemDto[]> {
+export async function listHelpRequests(statuses: HelpStatus[], { scope = null, limit = 200 }: { scope?: WorkshopScope; limit?: number } = {}): Promise<HelpQueueItemDto[]> {
   const { helpRequests, devs, labs } = await getCollections();
   const activeOnly = statuses.every((status) => ACTIVE_HELP_STATUSES.includes(status));
   const docs = await helpRequests
-    .find({ status: { $in: statuses } })
+    .find({ ...scopeFilter(scope), status: { $in: statuses } })
     .sort(activeOnly ? { createdAt: 1 } : { closedAt: -1, createdAt: -1 })
     .limit(limit)
     .toArray();
@@ -195,9 +219,10 @@ export async function listHelpRequests(statuses: HelpStatus[], limit = 200): Pro
 
   const devIds = [...new Set(docs.map((doc) => doc.devId))];
   const labIds = [...new Set(docs.flatMap((doc) => (doc.labId ? [doc.labId] : [])))];
-  const [devDocs, labDocs] = await Promise.all([
+  const [devDocs, labDocs, names] = await Promise.all([
     devs.find({ _id: { $in: devIds } }, { projection: { username: 1 } }).toArray(),
     labIds.length ? labs.find({ _id: { $in: labIds } }).toArray() : Promise.resolve([] as LabDoc[]),
+    workshopNames(),
   ]);
   const usernames = new Map(devDocs.map((dev) => [dev._id, dev.username]));
   const labMap = new Map(labDocs.map((lab) => [lab._id, toLabDto(lab)]));
@@ -205,23 +230,25 @@ export async function listHelpRequests(statuses: HelpStatus[], limit = 200): Pro
   return docs.map((doc) => ({
     ...toHelpDto(doc),
     dev: { id: doc.devId, username: usernames.get(doc.devId) ?? doc.devId.slice(0, 8) },
+    ...workshopRef(doc.workshopId, names),
     ...(doc.labId && labMap.has(doc.labId) ? { lab: labMap.get(doc.labId) } : {}),
   }));
 }
 
-export async function getMatrix(now = new Date()): Promise<MatrixDto> {
+export async function getMatrix(scope: WorkshopScope = null, now = new Date()): Promise<MatrixDto> {
   const { devs, labs, helpRequests } = await getCollections();
-  const [devDocs, labDocs, activeHelp, activeRequests] = await Promise.all([
-    devs.find({ $or: [{ archivedAt: null }, { archivedAt: { $exists: false } }] }).toArray(),
+  const [devDocs, labDocs, activeHelp, activeRequests, names] = await Promise.all([
+    devs.find({ ...scopeFilter(scope), ...NOT_ARCHIVED }).toArray(),
     labs.find({}).toArray(),
-    activeHelpByDev(),
-    helpRequests.find({ status: { $in: [...ACTIVE_HELP_STATUSES] } }, { projection: { devId: 1, labId: 1 } }).toArray(),
+    activeHelpByDev(scopeFilter(scope)),
+    helpRequests.find({ ...scopeFilter(scope), status: { $in: [...ACTIVE_HELP_STATUSES] } }, { projection: { devId: 1, labId: 1 } }).toArray(),
+    workshopNames(),
   ]);
   const blocked = new Set(activeRequests.filter((request) => request.labId).map((request) => `${request.devId}/${request.labId}`));
   const declared = new Set(devDocs.flatMap((dev) => dev.catalogLabIds ?? []));
   const sortedLabs = sortLabs(labDocs);
 
-  const rows = sortDevs(devDocs.map((dev) => toDevSummary(dev, activeHelp, now))).map((summary) => {
+  const rows = sortDevs(devDocs.map((dev) => toDevSummary(dev, activeHelp, now, names))).map((summary) => {
     const dev = devDocs.find((doc) => doc._id === summary.id)!;
     const online = isOnline(dev, now);
     return {
@@ -241,6 +268,7 @@ export async function getMatrix(now = new Date()): Promise<MatrixDto> {
 
   return {
     serverTime: now.toISOString(),
+    scope,
     labs: sortedLabs.map((lab) => ({ ...toLabDto(lab), declared: declared.has(lab._id) })),
     rows,
   };
@@ -296,9 +324,10 @@ function decodeCursor(cursor: string): { receivedAt: Date; id: string } | null {
   }
 }
 
-export async function listEvents(filter: { devId?: string; type?: string; cursor?: string | null }, limit = 50): Promise<EventPage> {
+export async function listEvents(filter: { devId?: string; type?: string; cursor?: string | null; scope?: WorkshopScope }, limit = 50): Promise<EventPage> {
   const { events } = await getCollections();
   const query: Filter<EventDoc> = {};
+  if (filter.scope) query.workshopId = filter.scope;
   if (filter.devId) query.devId = filter.devId;
   if (filter.type) query.type = filter.type;
   if (filter.cursor) {
@@ -320,12 +349,13 @@ export async function getDevDetail(devId: string, now = new Date()): Promise<Dev
   if (!dev) {
     throw new ApiError("notFound", "Developer not found");
   }
-  const [labDocs, runDocs, helpDocs, eventPage, activeHelp] = await Promise.all([
+  const [labDocs, runDocs, helpDocs, eventPage, activeHelp, names] = await Promise.all([
     labs.find({}).toArray(),
     runs.find({ devId }).sort({ startedAt: -1 }).limit(50).toArray(),
     helpRequests.find({ devId }).sort({ createdAt: -1 }).limit(50).toArray(),
     listEvents({ devId }, 100),
-    activeHelpByDev(),
+    activeHelpByDev({ devId }),
+    workshopNames(),
   ]);
 
   const online = isOnline(dev, now);
@@ -353,7 +383,7 @@ export async function getDevDetail(devId: string, now = new Date()): Promise<Dev
     };
   });
 
-  const summary = toDevSummary(dev, activeHelp, now);
+  const summary = toDevSummary(dev, activeHelp, now, names);
   return {
     serverTime: now.toISOString(),
     dev: {
